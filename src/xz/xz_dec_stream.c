@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: 0BSD
+
 /*
  * .xz Stream decoder
  *
  * Author: Lasse Collin <lasse.collin@tukaani.org>
- *
- * This file has been put into the public domain.
- * You can do whatever you want with this file.
  */
 
 #include "xz_private.h"
@@ -14,6 +13,12 @@
 #	define IS_CRC64(check_type) ((check_type) == XZ_CHECK_CRC64)
 #else
 #	define IS_CRC64(check_type) false
+#endif
+
+#ifdef XZ_USE_SHA256
+#	define IS_SHA256(check_type) ((check_type) == XZ_CHECK_SHA256)
+#else
+#	define IS_SHA256(check_type) false
 #endif
 
 /* Hash used to validate the Index field */
@@ -146,9 +151,23 @@ struct xz_dec {
 	struct xz_dec_bcj *bcj;
 	bool bcj_active;
 #endif
+
+#ifdef XZ_USE_SHA256
+	/*
+	 * SHA-256 value in Block
+	 *
+	 * struct xz_sha256 is over a hundred bytes and it's only accessed
+	 * from a few places. By putting the SHA-256 state near the end
+	 * of struct xz_dec (somewhere after the "index" member) reduces
+	 * code size at least on x86 and RISC-V. It's because the first bytes
+	 * of the struct can be accessed with smaller instructions; the
+	 * members that are accessed from many places should be at the top.
+	 */
+	struct xz_sha256 sha256;
+#endif
 };
 
-#ifdef XZ_DEC_ANY_CHECK
+#if defined(XZ_DEC_ANY_CHECK) || defined(XZ_USE_SHA256)
 /* Sizes of the Check field with different Check IDs */
 static const uint8_t check_sizes[16] = {
 	0,
@@ -162,9 +181,9 @@ static const uint8_t check_sizes[16] = {
 
 /*
  * Fill s->temp by copying data starting from b->in[b->in_pos]. Caller
- * must have set s->temp.pos to indicate how much data we are supposed
- * to copy into s->temp.buf. Return true once s->temp.pos has reached
- * s->temp.size.
+ * must have set s->temp.pos and s->temp.size to indicate how much data
+ * we are supposed to copy into s->temp.buf. Return true once s->temp.pos
+ * has reached s->temp.size.
  */
 static bool fill_temp(struct xz_dec *s, struct xz_buf *b)
 {
@@ -261,6 +280,11 @@ static enum xz_ret dec_block(struct xz_dec *s, struct xz_buf *b)
 		s->crc = xz_crc64(b->out + s->out_start,
 				b->out_pos - s->out_start, s->crc);
 #endif
+#ifdef XZ_USE_SHA256
+	else if (s->check_type == XZ_CHECK_SHA256)
+		xz_sha256_update(b->out + s->out_start,
+				b->out_pos - s->out_start, &s->sha256);
+#endif
 
 	if (ret == XZ_STREAM_END) {
 		if (s->block_header.compressed != VLI_UNKNOWN
@@ -276,7 +300,7 @@ static enum xz_ret dec_block(struct xz_dec *s, struct xz_buf *b)
 		s->block.hash.unpadded += s->block_header.size
 				+ s->block.compressed;
 
-#ifdef XZ_DEC_ANY_CHECK
+#if defined(XZ_DEC_ANY_CHECK) || defined(XZ_USE_SHA256)
 		s->block.hash.unpadded += check_sizes[s->check_type];
 #else
 		if (s->check_type == XZ_CHECK_CRC32)
@@ -429,13 +453,14 @@ static enum xz_ret dec_stream_header(struct xz_dec *s)
 
 	s->check_type = s->temp.buf[HEADER_MAGIC_SIZE + 1];
 
+	if (s->check_type > XZ_CHECK_CRC32 && !IS_CRC64(s->check_type)
+			&& !IS_SHA256(s->check_type)) {
 #ifdef XZ_DEC_ANY_CHECK
-	if (s->check_type > XZ_CHECK_CRC32 && !IS_CRC64(s->check_type))
 		return XZ_UNSUPPORTED_CHECK;
 #else
-	if (s->check_type > XZ_CHECK_CRC32 && !IS_CRC64(s->check_type))
 		return XZ_OPTIONS_ERROR;
 #endif
+	}
 
 	return XZ_OK;
 }
@@ -605,7 +630,7 @@ static enum xz_ret dec_main(struct xz_dec *s, struct xz_buf *b)
 			if (ret != XZ_OK)
 				return ret;
 
-		/* Fall through */
+			fallthrough;
 
 		case SEQ_BLOCK_START:
 			/* We need one byte of input to continue. */
@@ -630,7 +655,7 @@ static enum xz_ret dec_main(struct xz_dec *s, struct xz_buf *b)
 			s->temp.pos = 0;
 			s->sequence = SEQ_BLOCK_HEADER;
 
-		/* Fall through */
+			fallthrough;
 
 		case SEQ_BLOCK_HEADER:
 			if (!fill_temp(s, b))
@@ -640,9 +665,14 @@ static enum xz_ret dec_main(struct xz_dec *s, struct xz_buf *b)
 			if (ret != XZ_OK)
 				return ret;
 
+#ifdef XZ_USE_SHA256
+			if (s->check_type == XZ_CHECK_SHA256)
+				xz_sha256_reset(&s->sha256);
+#endif
+
 			s->sequence = SEQ_BLOCK_UNCOMPRESS;
 
-		/* Fall through */
+			fallthrough;
 
 		case SEQ_BLOCK_UNCOMPRESS:
 			ret = dec_block(s, b);
@@ -651,7 +681,7 @@ static enum xz_ret dec_main(struct xz_dec *s, struct xz_buf *b)
 
 			s->sequence = SEQ_BLOCK_PADDING;
 
-		/* Fall through */
+			fallthrough;
 
 		case SEQ_BLOCK_PADDING:
 			/*
@@ -673,7 +703,7 @@ static enum xz_ret dec_main(struct xz_dec *s, struct xz_buf *b)
 
 			s->sequence = SEQ_BLOCK_CHECK;
 
-		/* Fall through */
+			fallthrough;
 
 		case SEQ_BLOCK_CHECK:
 			if (s->check_type == XZ_CHECK_CRC32) {
@@ -686,6 +716,19 @@ static enum xz_ret dec_main(struct xz_dec *s, struct xz_buf *b)
 				if (ret != XZ_STREAM_END)
 					return ret;
 			}
+#ifdef XZ_USE_SHA256
+			else if (s->check_type == XZ_CHECK_SHA256) {
+				s->temp.size = 32;
+				if (!fill_temp(s, b))
+					return XZ_OK;
+
+				if (!xz_sha256_validate(s->temp.buf,
+							&s->sha256))
+					return XZ_DATA_ERROR;
+
+				s->pos = 0;
+			}
+#endif
 #ifdef XZ_DEC_ANY_CHECK
 			else if (!check_skip(s, b)) {
 				return XZ_OK;
@@ -702,7 +745,7 @@ static enum xz_ret dec_main(struct xz_dec *s, struct xz_buf *b)
 
 			s->sequence = SEQ_INDEX_PADDING;
 
-		/* Fall through */
+			fallthrough;
 
 		case SEQ_INDEX_PADDING:
 			while ((s->index.size + (b->in_pos - s->in_start))
@@ -726,7 +769,7 @@ static enum xz_ret dec_main(struct xz_dec *s, struct xz_buf *b)
 
 			s->sequence = SEQ_INDEX_CRC32;
 
-		/* Fall through */
+			fallthrough;
 
 		case SEQ_INDEX_CRC32:
 			ret = crc_validate(s, b, 32);
@@ -736,7 +779,7 @@ static enum xz_ret dec_main(struct xz_dec *s, struct xz_buf *b)
 			s->temp.size = STREAM_HEADER_SIZE;
 			s->sequence = SEQ_STREAM_FOOTER;
 
-		/* Fall through */
+			fallthrough;
 
 		case SEQ_STREAM_FOOTER:
 			if (!fill_temp(s, b))

@@ -1,10 +1,9 @@
+/* SPDX-License-Identifier: 0BSD */
+
 /*
  * Private includes and definitions
  *
  * Author: Lasse Collin <lasse.collin@tukaani.org>
- *
- * This file has been put into the public domain.
- * You can do whatever you want with this file.
  */
 
 #ifndef XZ_PRIVATE_H
@@ -13,7 +12,7 @@
 #ifdef __KERNEL__
 #	include <linux/xz.h>
 #	include <linux/kernel.h>
-#	include <asm/unaligned.h>
+#	include <linux/unaligned.h>
 	/* XZ_PREBOOT may be defined only via decompress_unxz.c. */
 #	ifndef XZ_PREBOOT
 #		include <linux/slab.h>
@@ -36,6 +35,12 @@
 #		endif
 #		ifdef CONFIG_XZ_DEC_SPARC
 #			define XZ_DEC_SPARC
+#		endif
+#		ifdef CONFIG_XZ_DEC_ARM64
+#			define XZ_DEC_ARM64
+#		endif
+#		ifdef CONFIG_XZ_DEC_RISCV
+#			define XZ_DEC_RISCV
 #		endif
 #		ifdef CONFIG_XZ_DEC_MICROLZMA
 #			define XZ_DEC_MICROLZMA
@@ -98,12 +103,37 @@
  */
 #ifndef XZ_DEC_BCJ
 #	if defined(XZ_DEC_X86) || defined(XZ_DEC_POWERPC) \
-			|| defined(XZ_DEC_IA64) || defined(XZ_DEC_ARM) \
+			|| defined(XZ_DEC_IA64) \
 			|| defined(XZ_DEC_ARM) || defined(XZ_DEC_ARMTHUMB) \
-			|| defined(XZ_DEC_SPARC)
+			|| defined(XZ_DEC_SPARC) || defined(XZ_DEC_ARM64) \
+			|| defined(XZ_DEC_RISCV)
 #		define XZ_DEC_BCJ
 #	endif
 #endif
+
+struct xz_sha256 {
+	/* Buffered input data */
+	uint8_t data[64];
+
+	/* Internal state and the final hash value */
+	uint32_t state[8];
+
+	/* Size of the input data */
+	uint64_t size;
+};
+
+/* Reset the SHA-256 state to prepare for a new calculation. */
+XZ_EXTERN void xz_sha256_reset(struct xz_sha256 *s);
+
+/* Update the SHA-256 state with new data. */
+XZ_EXTERN void xz_sha256_update(const uint8_t *buf, size_t size,
+				struct xz_sha256 *s);
+
+/*
+ * Finish the SHA-256 calculation. Compare the result with the first 32 bytes
+ * from buf. Return true if the values are equal and false if they aren't.
+ */
+XZ_EXTERN bool xz_sha256_validate(const uint8_t *buf, struct xz_sha256 *s);
 
 /*
  * Allocate memory for LZMA2 decoder. xz_dec_lzma2_reset() must be used
