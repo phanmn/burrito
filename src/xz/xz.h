@@ -403,6 +403,7 @@ XZ_EXTERN void xz_dec_microlzma_end(struct xz_dec_microlzma *s);
 #	undef XZ_INTERNAL_CRC64
 #	define XZ_INTERNAL_CRC64 0
 #endif
+
 #ifndef XZ_INTERNAL_CRC64
 #	ifdef __KERNEL__
 #		error Using CRC64 in the kernel has not been implemented.

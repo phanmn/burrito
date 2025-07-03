@@ -39,7 +39,10 @@ const mem = std.mem;
 const os = std.os;
 const gzip = std.compress.gzip;
 
-const xz = @cImport(@cInclude("xz.h"));
+const xz = @cImport({
+    @cDefine("XZ_USE_CRC64", "1");
+    @cInclude("xz.h");
+});
 
 const MAGIC = "FOILZ";
 const MAX_READ_SIZE = 1000000000;
@@ -144,6 +147,7 @@ pub fn unpack_files(data: []const u8, dest_path: []const u8, uncompressed_size: 
         .out_pos = 0,
     };
 
+    xz.xz_crc64_init();
     xz.xz_crc32_init();
     const status = xz.xz_dec_init(xz.XZ_SINGLE, 0);
     const ret = xz.xz_dec_run(status, &xz_buffer);

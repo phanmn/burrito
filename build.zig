@@ -39,9 +39,9 @@ pub fn run_archiver() !void {
     try foilz.pack_directory(release_path, "./payload.foilz");
 
     if (builtin.os.tag == .windows) {
-        _ = builder.run(&[_][]const u8{ "cmd", "/C", "xz -9ez --check=crc32 --stdout --keep payload.foilz > src/payload.foilz.xz" });
+        _ = builder.run(&[_][]const u8{ "cmd", "/C", "xz -9ez --check=crc64 --stdout --keep payload.foilz > src/payload.foilz.xz" });
     } else {
-        _ = builder.run(&[_][]const u8{ "/bin/sh", "-c", "xz -9ez --check=crc32 --stdout --keep payload.foilz > src/payload.foilz.xz" });
+        _ = builder.run(&[_][]const u8{ "/bin/sh", "-c", "xz -9ez --check=crc64 --stdout --keep payload.foilz > src/payload.foilz.xz" });
     }
 }
 
@@ -103,6 +103,7 @@ pub fn build_wrapper() !void {
 
     wrapper_exe.addIncludePath(builder.path("src/xz"));
     wrapper_exe.addCSourceFile(.{ .file = builder.path("src/xz/xz_crc32.c") });
+    wrapper_exe.addCSourceFile(.{ .file = builder.path("src/xz/xz_crc64.c") });
     wrapper_exe.addCSourceFile(.{ .file = builder.path("src/xz/xz_dec_lzma2.c") });
     wrapper_exe.addCSourceFile(.{ .file = builder.path("src/xz/xz_dec_stream.c") });
 
