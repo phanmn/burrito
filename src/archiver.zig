@@ -144,7 +144,7 @@ pub fn unpack_files(data: []const u8, dest_path: []const u8, uncompressed_size: 
         .out_pos = 0,
     };
 
-    xz.xz_crc32_init();
+    // xz.xz_crc32_init();
     const status = xz.xz_dec_init(xz.XZ_SINGLE, 0);
     const ret = xz.xz_dec_run(status, &xz_buffer);
     xz.xz_dec_end(status);
